@@ -33,6 +33,7 @@ class EyeTracker:
         self.max_sensitivity = 4.0
         self.at_sensitivity_limit = False
         self.limit_warning_time = 0
+        self.calibration_progress = 0  # Track calibration progress
         
     def get_eye_aspect_ratio(self, eye_points):
         # Calculate the eye aspect ratio
@@ -61,13 +62,19 @@ class EyeTracker:
         return np.array(left_eye), np.array(right_eye)
     
     def calibrate(self, eye_center):
+        if not eye_center.any():  # Check if eye_center is valid
+            return False
+            
         if len(self.calibration_points) < 30:  # Collect 30 points for calibration
             self.calibration_points.append(eye_center)
+            self.calibration_progress = (len(self.calibration_points) / 30) * 100
+            return False
         else:
             # Calculate average center point from calibration
             self.center_point = np.mean(self.calibration_points, axis=0)
             self.is_calibrated = True
             print("Calibration complete!")
+            return True
     
     def get_mouse_position(self, eye_center):
         if not self.is_calibrated or self.is_paused:
@@ -115,14 +122,24 @@ def draw_ui(frame, tracker, frame_height):
     status = "PAUSED" if tracker.is_paused else ("CALIBRATING" if not tracker.is_calibrated else "TRACKING")
     cv2.putText(frame, f"Status: {status}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
     
-    # Draw sensitivity with range indicators
-    sensitivity_text = f"Sensitivity: {tracker.sensitivity:.1f} [{tracker.min_sensitivity:.1f}-{tracker.max_sensitivity:.1f}]"
-    cv2.putText(frame, sensitivity_text, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+    # Draw calibration progress or sensitivity
+    if not tracker.is_calibrated:
+        progress_text = f"Calibration: {tracker.calibration_progress:.0f}%"
+        cv2.putText(frame, progress_text, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1)
+        # Draw progress bar
+        bar_length = 200
+        filled_length = int(bar_length * tracker.calibration_progress / 100)
+        cv2.rectangle(frame, (20, 60), (20 + bar_length, 70), (100, 100, 100), 1)
+        if filled_length > 0:
+            cv2.rectangle(frame, (20, 60), (20 + filled_length, 70), (0, 255, 0), -1)
+    else:
+        sensitivity_text = f"Sensitivity: {tracker.sensitivity:.1f} [{tracker.min_sensitivity:.1f}-{tracker.max_sensitivity:.1f}]"
+        cv2.putText(frame, sensitivity_text, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
     
     # Show warning if at sensitivity limit
     if tracker.at_sensitivity_limit and time.time() - tracker.limit_warning_time < 1.0:
         limit_msg = "Maximum sensitivity" if tracker.sensitivity == tracker.max_sensitivity else "Minimum sensitivity"
-        cv2.putText(frame, limit_msg, (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 1)
+        cv2.putText(frame, limit_msg, (20, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 1)
     
     # Draw controls
     controls = [
@@ -169,7 +186,8 @@ def main():
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         faces = detector(gray)
         
-        for face in faces:
+        if len(faces) > 0:  # Only process if a face is detected
+            face = faces[0]  # Use the first face detected
             landmarks = predictor(gray, face)
             left_eye, right_eye = tracker.get_eye_coordinates(landmarks, frame)
             
@@ -188,10 +206,10 @@ def main():
                     tracker.calibrate(eye_center)
                 else:
                     tracker.is_calibrated = True
-            else:
+            elif not tracker.is_paused:  # Only move mouse if not paused and calibrated
                 # Get and apply mouse position
                 mouse_pos = tracker.get_mouse_position(eye_center)
-                if mouse_pos and not tracker.is_paused:
+                if mouse_pos:
                     x, y = mouse_pos
                     # Ensure coordinates are within screen bounds
                     x = max(0, min(x, screen_width))
@@ -211,6 +229,7 @@ def main():
         elif key == ord('r'):
             tracker.calibration_points = []
             tracker.is_calibrated = False
+            tracker.calibration_progress = 0
             start_time = time.time()
             print("Recalibrating...")
         elif key == ord('p'):
