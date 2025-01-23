@@ -27,6 +27,8 @@ class EyeTracker:
         self.is_calibrated = False
         self.center_point = None
         self.mouse_positions = deque(maxlen=5)  # Store last 5 positions for smoothing
+        self.is_paused = False
+        self.sensitivity = 2.0  # Default sensitivity multiplier
         
     def get_eye_aspect_ratio(self, eye_points):
         # Calculate the eye aspect ratio
@@ -64,22 +66,49 @@ class EyeTracker:
             print("Calibration complete!")
     
     def get_mouse_position(self, eye_center):
-        if not self.is_calibrated:
+        if not self.is_calibrated or self.is_paused:
             return None
         
         # Calculate offset from center point
         offset_x = eye_center[0] - self.center_point[0]
         offset_y = eye_center[1] - self.center_point[1]
         
-        # Scale offset to screen coordinates
-        screen_x = screen_width // 2 + (offset_x * 2)
-        screen_y = screen_height // 2 + (offset_y * 2)
+        # Scale offset to screen coordinates using sensitivity
+        screen_x = screen_width // 2 + (offset_x * self.sensitivity)
+        screen_y = screen_height // 2 + (offset_y * self.sensitivity)
         
         # Apply smoothing
         self.mouse_positions.append((screen_x, screen_y))
         smoothed_pos = np.mean(self.mouse_positions, axis=0)
         
         return int(smoothed_pos[0]), int(smoothed_pos[1])
+
+    def adjust_sensitivity(self, increase=True):
+        if increase:
+            self.sensitivity = min(5.0, self.sensitivity + 0.2)
+        else:
+            self.sensitivity = max(0.5, self.sensitivity - 0.2)
+
+def draw_ui(frame, tracker, frame_height):
+    # Draw semi-transparent black background for UI
+    ui_overlay = frame.copy()
+    cv2.rectangle(ui_overlay, (10, 10), (400, 120), (0, 0, 0), -1)
+    cv2.addWeighted(ui_overlay, 0.3, frame, 0.7, 0, frame)
+    
+    # Draw status and controls
+    status = "PAUSED" if tracker.is_paused else ("CALIBRATING" if not tracker.is_calibrated else "TRACKING")
+    cv2.putText(frame, f"Status: {status}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+    cv2.putText(frame, f"Sensitivity: {tracker.sensitivity:.1f}", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+    
+    # Draw controls
+    controls = [
+        "Q: Quit",
+        "R: Recalibrate",
+        "P: Pause/Resume",
+        "+/-: Adjust sensitivity"
+    ]
+    for i, control in enumerate(controls):
+        cv2.putText(frame, control, (220, 30 + i * 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
 def wait_for_camera_access():
     """Wait until camera access is granted."""
@@ -133,26 +162,40 @@ def main():
             if not tracker.is_calibrated:
                 if time.time() - start_time < CALIBRATION_TIME:
                     tracker.calibrate(eye_center)
-                    cv2.putText(frame, "Calibrating...", (10, 30),
-                              cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
                 else:
                     tracker.is_calibrated = True
             else:
                 # Get and apply mouse position
                 mouse_pos = tracker.get_mouse_position(eye_center)
-                if mouse_pos:
+                if mouse_pos and not tracker.is_paused:
                     x, y = mouse_pos
                     # Ensure coordinates are within screen bounds
                     x = max(0, min(x, screen_width))
                     y = max(0, min(y, screen_height))
                     pyautogui.moveTo(x, y, duration=0.1)
         
+        # Draw UI
+        draw_ui(frame, tracker, frame.shape[0])
+        
         # Display the frame
         cv2.imshow('Eye Tracking', frame)
         
-        # Break loop on 'q' press
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        # Handle keyboard input
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q'):
             break
+        elif key == ord('r'):
+            tracker.calibration_points = []
+            tracker.is_calibrated = False
+            start_time = time.time()
+            print("Recalibrating...")
+        elif key == ord('p'):
+            tracker.is_paused = not tracker.is_paused
+            print("Tracking Paused" if tracker.is_paused else "Tracking Resumed")
+        elif key == ord('=') or key == ord('+'):
+            tracker.adjust_sensitivity(increase=True)
+        elif key == ord('-') or key == ord('_'):
+            tracker.adjust_sensitivity(increase=False)
     
     # Cleanup
     cap.release()
