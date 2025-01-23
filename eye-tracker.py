@@ -115,68 +115,75 @@ class EyeTracker:
 def draw_ui(frame, tracker, frame_height):
     # Calculate dimensions based on frame size
     frame_width = frame.shape[1]
-    ui_width = min(500, int(frame_width * 0.9))  # Increased max width
-    ui_height = 120  # Reduced height
-    padding = 15
-    text_height = 30  # Increased text height for better separation
+    padding = 15  # Increased padding
+    text_height = 22  # Slightly reduced text height
+    
+    # Calculate UI dimensions
+    ui_width = min(400, int(frame_width * 0.9))
+    ui_height = text_height * 4 + padding * 2  # Height based on content plus padding
     
     # Calculate positions for two-column layout
-    ui_x = padding
-    ui_y = padding
+    ui_x = padding  # Start padding from left
+    ui_y = padding  # Start padding from top
     left_col_x = ui_x + padding
-    right_col_x = ui_x + ui_width - 200  # Fixed position for right column
+    right_col_x = left_col_x + 190  # Slightly increased distance for better separation
     
     # Draw semi-transparent black background for UI
     ui_overlay = frame.copy()
     cv2.rectangle(ui_overlay, (ui_x, ui_y), (ui_x + ui_width, ui_y + ui_height), (0, 0, 0), -1)
-    cv2.addWeighted(ui_overlay, 0.5, frame, 0.5, 0, frame)  # Increased opacity
+    cv2.addWeighted(ui_overlay, 0.6, frame, 0.4, 0, frame)
+    
+    # Calculate vertical positions for text
+    first_line_y = ui_y + padding + text_height
+    second_line_y = first_line_y + text_height
+    third_line_y = second_line_y + text_height
     
     # Left Column: Status and Info
     # Draw status
     status = "PAUSED" if tracker.is_paused else ("CALIBRATING" if not tracker.is_calibrated else "TRACKING")
     cv2.putText(frame, f"Status: {status}", 
-                (left_col_x, ui_y + text_height), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+                (left_col_x, first_line_y), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
     
-    # Draw calibration progress or sensitivity (left column, second line)
+    # Draw calibration progress or sensitivity
     if not tracker.is_calibrated:
         # Progress text
         progress_text = f"Calibration: {tracker.calibration_progress:.0f}%"
         cv2.putText(frame, progress_text, 
-                    (left_col_x, ui_y + text_height * 2), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1)
+                    (left_col_x, second_line_y), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 1)
         
-        # Progress bar (shortened and moved up)
-        bar_y = ui_y + text_height * 2.5
-        bar_length = 150  # Fixed shorter length
+        # Progress bar
+        bar_y = second_line_y + text_height/2
+        bar_length = 120
         filled_length = int(bar_length * tracker.calibration_progress / 100)
         
         # Draw background bar
         cv2.rectangle(frame, 
                      (left_col_x, int(bar_y)), 
-                     (left_col_x + bar_length, int(bar_y + 8)), 
+                     (left_col_x + bar_length, int(bar_y + 6)), 
                      (100, 100, 100), 1)
         
         # Draw filled portion
         if filled_length > 0:
             cv2.rectangle(frame, 
                          (left_col_x, int(bar_y)), 
-                         (left_col_x + filled_length, int(bar_y + 8)), 
+                         (left_col_x + filled_length, int(bar_y + 6)), 
                          (0, 255, 0), -1)
     else:
         # Sensitivity text
         sensitivity_text = f"Sensitivity: {tracker.sensitivity:.1f}"
         cv2.putText(frame, sensitivity_text, 
-                    (left_col_x, ui_y + text_height * 2), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+                    (left_col_x, second_line_y), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
         
-        # Range in smaller text below
+        # Range in smaller text
         range_text = f"Range: [{tracker.min_sensitivity:.1f}-{tracker.max_sensitivity:.1f}]"
         cv2.putText(frame, range_text, 
-                    (left_col_x, ui_y + text_height * 3), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+                    (left_col_x, third_line_y), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 180, 180), 1)
     
-    # Right Column: Controls
+    # Right Column: Controls (aligned and compact)
     controls = [
         "Q: Quit",
         "R: Recalibrate",
@@ -185,8 +192,8 @@ def draw_ui(frame, tracker, frame_height):
     ]
     for i, control in enumerate(controls):
         cv2.putText(frame, control, 
-                    (right_col_x, ui_y + text_height * (i + 1)), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+                    (right_col_x, first_line_y + text_height * i), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
     
     # Show warning if at sensitivity limit (as overlay)
     if tracker.at_sensitivity_limit and time.time() - tracker.limit_warning_time < 1.0:
@@ -195,7 +202,7 @@ def draw_ui(frame, tracker, frame_height):
         warning_y = ui_y + ui_height + padding
         cv2.putText(frame, limit_msg, 
                     (left_col_x, warning_y), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 1)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
 
 def wait_for_camera_access():
     """Wait until camera access is granted."""
