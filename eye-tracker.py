@@ -29,6 +29,10 @@ class EyeTracker:
         self.mouse_positions = deque(maxlen=5)  # Store last 5 positions for smoothing
         self.is_paused = False
         self.sensitivity = 2.0  # Default sensitivity multiplier
+        self.min_sensitivity = 0.5
+        self.max_sensitivity = 4.0
+        self.at_sensitivity_limit = False
+        self.limit_warning_time = 0
         
     def get_eye_aspect_ratio(self, eye_points):
         # Calculate the eye aspect ratio
@@ -69,36 +73,56 @@ class EyeTracker:
         if not self.is_calibrated or self.is_paused:
             return None
         
-        # Calculate offset from center point
-        offset_x = eye_center[0] - self.center_point[0]
-        offset_y = eye_center[1] - self.center_point[1]
-        
-        # Scale offset to screen coordinates using sensitivity
-        screen_x = screen_width // 2 + (offset_x * self.sensitivity)
-        screen_y = screen_height // 2 + (offset_y * self.sensitivity)
-        
-        # Apply smoothing
-        self.mouse_positions.append((screen_x, screen_y))
-        smoothed_pos = np.mean(self.mouse_positions, axis=0)
-        
-        return int(smoothed_pos[0]), int(smoothed_pos[1])
+        try:
+            # Calculate offset from center point
+            offset_x = eye_center[0] - self.center_point[0]
+            offset_y = eye_center[1] - self.center_point[1]
+            
+            # Scale offset to screen coordinates using sensitivity
+            screen_x = screen_width // 2 + (offset_x * self.sensitivity)
+            screen_y = screen_height // 2 + (offset_y * self.sensitivity)
+            
+            # Apply smoothing
+            self.mouse_positions.append((screen_x, screen_y))
+            smoothed_pos = np.mean(self.mouse_positions, axis=0)
+            
+            return int(smoothed_pos[0]), int(smoothed_pos[1])
+        except (ValueError, TypeError, OverflowError) as e:
+            print(f"Error calculating mouse position: {e}")
+            return None
 
     def adjust_sensitivity(self, increase=True):
+        old_sensitivity = self.sensitivity
         if increase:
-            self.sensitivity = min(5.0, self.sensitivity + 0.2)
+            self.sensitivity = min(self.max_sensitivity, self.sensitivity + 0.2)
         else:
-            self.sensitivity = max(0.5, self.sensitivity - 0.2)
+            self.sensitivity = max(self.min_sensitivity, self.sensitivity - 0.2)
+        
+        # Check if we hit a limit
+        if self.sensitivity in [self.min_sensitivity, self.max_sensitivity]:
+            self.at_sensitivity_limit = True
+            self.limit_warning_time = time.time()
+        else:
+            self.at_sensitivity_limit = False
 
 def draw_ui(frame, tracker, frame_height):
     # Draw semi-transparent black background for UI
     ui_overlay = frame.copy()
-    cv2.rectangle(ui_overlay, (10, 10), (400, 120), (0, 0, 0), -1)
+    cv2.rectangle(ui_overlay, (10, 10), (400, 140), (0, 0, 0), -1)
     cv2.addWeighted(ui_overlay, 0.3, frame, 0.7, 0, frame)
     
     # Draw status and controls
     status = "PAUSED" if tracker.is_paused else ("CALIBRATING" if not tracker.is_calibrated else "TRACKING")
     cv2.putText(frame, f"Status: {status}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-    cv2.putText(frame, f"Sensitivity: {tracker.sensitivity:.1f}", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+    
+    # Draw sensitivity with range indicators
+    sensitivity_text = f"Sensitivity: {tracker.sensitivity:.1f} [{tracker.min_sensitivity:.1f}-{tracker.max_sensitivity:.1f}]"
+    cv2.putText(frame, sensitivity_text, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+    
+    # Show warning if at sensitivity limit
+    if tracker.at_sensitivity_limit and time.time() - tracker.limit_warning_time < 1.0:
+        limit_msg = "Maximum sensitivity" if tracker.sensitivity == tracker.max_sensitivity else "Minimum sensitivity"
+        cv2.putText(frame, limit_msg, (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 1)
     
     # Draw controls
     controls = [
